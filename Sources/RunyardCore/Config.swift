@@ -1,10 +1,10 @@
 import Foundation
 
-struct ServiceConfig: Codable, Hashable {
-    var name: String
-    var command: String
-    var path: String?
-    var env: [String: String]?
+public struct ServiceConfig: Codable, Hashable, Sendable {
+    public var name: String
+    public var command: String
+    public var path: String?
+    public var env: [String: String]?
 }
 
 struct ProjectFile: Codable {
@@ -13,15 +13,15 @@ struct ProjectFile: Codable {
     var services: [ServiceConfig]
 }
 
-struct Project {
-    let name: String
-    let path: String
-    let services: [ServiceConfig]
-    let file: URL
+public struct Project: Sendable {
+    public let name: String
+    public let path: String
+    public let services: [ServiceConfig]
+    public let file: URL
 
-    var expandedPath: String { (path as NSString).expandingTildeInPath }
+    public var expandedPath: String { (path as NSString).expandingTildeInPath }
 
-    func directory(for service: ServiceConfig) -> String {
+    public func directory(for service: ServiceConfig) -> String {
         guard let servicePath = service.path else { return expandedPath }
         let expanded = (servicePath as NSString).expandingTildeInPath
         if expanded.hasPrefix("/") { return expanded }
@@ -29,14 +29,25 @@ struct Project {
     }
 }
 
-enum ConfigStore {
-    static let home = FileManager.default.homeDirectoryForCurrentUser
-    static let directory = home.appendingPathComponent(".config/runyard")
-    static let projectsDirectory = directory.appendingPathComponent("projects")
-    static let logsDirectory = home.appendingPathComponent("Library/Logs/runyard")
-    static let stateFile = directory.appendingPathComponent("state.json")
+public enum ConfigStore {
+    public static let home = FileManager.default.homeDirectoryForCurrentUser
+    public static let directory = home.appendingPathComponent(".config/runyard")
+    public static let projectsDirectory = directory.appendingPathComponent("projects")
+    public static let logsDirectory = home.appendingPathComponent("Library/Logs/runyard")
+    public static let stateFile = directory.appendingPathComponent("state.json")
+    public static let socketPath = directory.appendingPathComponent("runyard.sock").path
 
-    static func load() -> (projects: [Project], errors: [String]) {
+    public static func logURL(project: String, service: String) -> URL {
+        logsDirectory
+            .appendingPathComponent(sanitize(project))
+            .appendingPathComponent(sanitize(service) + ".log")
+    }
+
+    private static func sanitize(_ name: String) -> String {
+        name.replacingOccurrences(of: "/", with: "-")
+    }
+
+    public static func load() -> (projects: [Project], errors: [String]) {
         let manager = FileManager.default
         try? manager.createDirectory(at: projectsDirectory, withIntermediateDirectories: true)
         let files = ((try? manager.contentsOfDirectory(at: projectsDirectory, includingPropertiesForKeys: nil)) ?? [])

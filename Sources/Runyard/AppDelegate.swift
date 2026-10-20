@@ -1,4 +1,5 @@
 import AppKit
+import RunyardCore
 import ServiceManagement
 
 final class ActionItem: NSMenuItem {
@@ -28,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let manager = ProcessManager.shared
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
+    private lazy var server = ControlServer(manager: manager)
     private var header: NSMenuItem?
     private var refreshers: [() -> Void] = []
     private let expandedKey = "expandedProjects"
@@ -46,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         manager.onChange = { [weak self] in self?.refresh() }
         refresh()
+        server.start()
         print("Runyard iniciado")
     }
 

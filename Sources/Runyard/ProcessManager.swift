@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import RunyardCore
 
 enum ServiceStatus: Equatable {
     case stopped
@@ -65,9 +66,11 @@ final class ProcessManager {
     }
 
     func logURL(_ key: ServiceKey) -> URL {
-        ConfigStore.logsDirectory
-            .appendingPathComponent(sanitize(key.project))
-            .appendingPathComponent(sanitize(key.service) + ".log")
+        ConfigStore.logURL(project: key.project, service: key.service)
+    }
+
+    func pid(_ key: ServiceKey) -> pid_t? {
+        pids[key]
     }
 
     func hasLog(_ key: ServiceKey) -> Bool {
@@ -81,7 +84,7 @@ final class ProcessManager {
         let url = logURL(key)
         let directory = project.directory(for: service)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        append(url, "\n===== iniciando `\(service.command)` em \(directory) — \(Date()) =====\n")
+        append(url, "\n===== iniciando `\(service.command)` em \(directory) — \(timestamp()) =====\n")
 
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let rc = shell.hasSuffix("zsh") ? "[ -f ~/.zshrc ] && source ~/.zshrc >/dev/null 2>&1; " : ""
@@ -177,7 +180,7 @@ final class ProcessManager {
         watchers.removeValue(forKey: key)?.cancel()
         let wasStopping = statuses[key] == .stopping
         statuses[key] = wasStopping ? .stopped : .exited(code)
-        append(logURL(key), "\n===== encerrado com código \(code) — \(Date()) =====\n")
+        append(logURL(key), "\n===== encerrado com código \(code) — \(timestamp()) =====\n")
         print("Serviço \(key.project)/\(key.service) encerrado com código \(code)")
 
         if pendingRestart.remove(key) != nil,
@@ -185,6 +188,12 @@ final class ProcessManager {
            let service = project.services.first(where: { $0.name == key.service }) {
             start(project, service)
         }
+    }
+
+    private func timestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: Date())
     }
 
     private func saveState() {
@@ -226,10 +235,6 @@ final class ProcessManager {
         } else {
             try? data.write(to: url)
         }
-    }
-
-    private func sanitize(_ name: String) -> String {
-        name.replacingOccurrences(of: "/", with: "-")
     }
 
     private func shellQuote(_ value: String) -> String {

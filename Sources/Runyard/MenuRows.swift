@@ -1,4 +1,5 @@
 import AppKit
+import RunyardCore
 
 enum StatusStyle {
     static func color(_ status: ServiceStatus) -> NSColor {
