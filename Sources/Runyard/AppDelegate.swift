@@ -28,6 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let manager = ProcessManager.shared
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
+    private var header: NSMenuItem?
+    private var refreshers: [() -> Void] = []
+    private let expandedKey = "expandedProjects"
+
+    private var expanded: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: expandedKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: expandedKey) }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -36,8 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
         statusItem.menu = menu
-        manager.onChange = { [weak self] in self?.updateButton() }
-        updateButton()
+        manager.onChange = { [weak self] in self?.refresh() }
+        refresh()
         print("Runyard iniciado")
     }
 
@@ -61,19 +69,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return image
     }
 
-    private func updateButton() {
+    private func refresh() {
         let count = manager.runningCount
         statusItem.button?.title = count > 0 ? " \(count)" : ""
+        header?.title = count > 0 ? "\(count) serviço(s) rodando" : "Nenhum serviço rodando"
+        header?.image = StatusStyle.dot(StatusStyle.color(allStatuses()))
+        refreshers.forEach { $0() }
+    }
+
+    private func allStatuses() -> [ServiceStatus] {
+        manager.projects.flatMap { project in project.services.map { manager.status(manager.key(project, $0)) } }
+    }
+
+    private func toggle(_ project: Project) {
+        var current = expanded
+        if current.remove(project.name) == nil {
+            current.insert(project.name)
+        }
+        expanded = current
+        DispatchQueue.main.async {
+            self.build(self.menu)
+        }
     }
 
     private func build(_ menu: NSMenu) {
         menu.removeAllItems()
+        refreshers = []
 
-        let count = manager.runningCount
-        let header = NSMenuItem(title: count > 0 ? "\(count) serviço(s) rodando" : "Nenhum serviço rodando", action: nil, keyEquivalent: "")
-        header.image = dot(color(for: manager.projects))
+        let header = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        self.header = header
         menu.addItem(.separator())
 
         for error in manager.configErrors {
@@ -89,11 +115,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(empty)
         }
 
+        let open = expanded
         for project in manager.projects {
-            let item = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
-            item.image = dot(color(for: [project]))
-            item.submenu = projectMenu(project)
-            menu.addItem(item)
+            let isOpen = open.contains(project.name)
+            let headerView = ProjectHeaderView(project: project, manager: manager, expanded: isOpen) { [weak self] in
+                self?.toggle(project)
+            }
+            add(headerView, to: menu)
+            refreshers.append(headerView.refresh)
+
+            guard isOpen else { continue }
+            for service in project.services {
+                let row = ServiceRowView(project: project, service: service, manager: manager)
+                add(row, to: menu)
+                refreshers.append(row.refresh)
+            }
         }
 
         menu.addItem(.separator())
@@ -114,70 +150,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(ActionItem("Parar tudo e sair", symbol: "power", key: "q") { [weak self] in
             self?.manager.quit()
         })
+        refresh()
     }
 
-    private func projectMenu(_ project: Project) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let anyActive = project.services.contains { manager.isActive(manager.key(project, $0)) }
-
-        menu.addItem(ActionItem("Subir todos", symbol: "play.fill") { [weak self] in
-            self?.manager.startAll(project)
-        })
-        menu.addItem(ActionItem("Parar todos", symbol: "stop.fill", enabled: anyActive) { [weak self] in
-            self?.manager.stopAll(project)
-        })
-        menu.addItem(.separator())
-
-        for service in project.services {
-            let key = manager.key(project, service)
-            let item = NSMenuItem(title: service.name, action: nil, keyEquivalent: "")
-            item.image = dot(color(for: manager.status(key)))
-            if #available(macOS 14.4, *) {
-                item.subtitle = service.command
-            }
-            item.submenu = serviceMenu(project, service)
-            menu.addItem(item)
-        }
-
-        menu.addItem(.separator())
-        menu.addItem(ActionItem("Abrir pasta do projeto", symbol: "folder") {
-            NSWorkspace.shared.open(URL(fileURLWithPath: project.expandedPath))
-        })
-        menu.addItem(ActionItem("Editar registro", symbol: "square.and.pencil") {
-            NSWorkspace.shared.open(project.file)
-        })
-        return menu
-    }
-
-    private func serviceMenu(_ project: Project, _ service: ServiceConfig) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let key = manager.key(project, service)
-        let active = manager.isActive(key)
-
-        let status = NSMenuItem(title: label(for: manager.status(key)), action: nil, keyEquivalent: "")
-        status.image = dot(color(for: manager.status(key)))
-        status.isEnabled = false
-        menu.addItem(status)
-        menu.addItem(.separator())
-
-        if active {
-            menu.addItem(ActionItem("Reiniciar", symbol: "arrow.clockwise") { [weak self] in
-                self?.manager.restart(project, service)
-            })
-            menu.addItem(ActionItem("Parar", symbol: "stop.fill") { [weak self] in
-                self?.manager.stop(key)
-            })
-        } else {
-            menu.addItem(ActionItem("Subir", symbol: "play.fill") { [weak self] in
-                self?.manager.start(project, service)
-            })
-        }
-        menu.addItem(ActionItem("Ver log", symbol: "doc.text", enabled: active || manager.hasLog(key)) { [weak self] in
-            self?.manager.openLog(key)
-        })
-        return menu
+    private func add(_ view: NSView, to menu: NSMenu) {
+        let item = NSMenuItem()
+        item.view = view
+        menu.addItem(item)
     }
 
     private func toggleLaunchAtLogin() {
@@ -189,43 +168,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } catch {
             print("Erro ao alterar abertura no login: \(error)")
-        }
-    }
-
-    private func color(for projects: [Project]) -> NSColor {
-        let statuses = projects.flatMap { project in project.services.map { manager.status(manager.key(project, $0)) } }
-        if statuses.contains(where: { if case .exited(let code) = $0 { code != 0 } else { false } }) {
-            return .systemRed
-        }
-        if statuses.contains(where: { $0 == .running || $0 == .stopping }) {
-            return .systemGreen
-        }
-        return .systemGray
-    }
-
-    private func color(for status: ServiceStatus) -> NSColor {
-        switch status {
-        case .running: .systemGreen
-        case .stopping: .systemYellow
-        case .exited(let code) where code != 0: .systemRed
-        default: .systemGray
-        }
-    }
-
-    private func label(for status: ServiceStatus) -> String {
-        switch status {
-        case .running: "Rodando"
-        case .stopping: "Parando"
-        case .stopped: "Parado"
-        case .exited(let code): "Encerrado com código \(code)"
-        }
-    }
-
-    private func dot(_ color: NSColor) -> NSImage {
-        NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
-            color.setFill()
-            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
-            return true
         }
     }
 }

@@ -26,6 +26,7 @@ Cada projeto tem um arquivo em `~/.config/runyard/projects/<projeto>.json`:
 
 - `name` é opcional. O padrão é o nome do arquivo.
 - `command` roda com `zsh -l` dentro de `path`.
+- Um serviço pode ter `path` próprio, absoluto ou relativo ao `path` do projeto. Use isso quando um projeto tem vários repositórios.
 - O app relê os registros toda vez que o menu abre.
 
 ## Logs

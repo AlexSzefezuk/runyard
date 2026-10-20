@@ -8,9 +8,14 @@ enum ServiceStatus: Equatable {
     case exited(Int32)
 }
 
-struct ServiceKey: Hashable {
+struct ServiceKey: Hashable, Codable {
     let project: String
     let service: String
+}
+
+struct RunningEntry: Codable {
+    let key: ServiceKey
+    let pid: pid_t
 }
 
 @MainActor
@@ -24,12 +29,16 @@ final class ProcessManager {
     }
     var onChange: (() -> Void)?
 
-    private var pids: [ServiceKey: pid_t] = [:]
+    private var pids: [ServiceKey: pid_t] = [:] {
+        didSet { saveState() }
+    }
+    private var watchers: [ServiceKey: DispatchSourceProcess] = [:]
     private var pendingRestart: Set<ServiceKey> = []
     private let killTimeout: TimeInterval = 15
 
     init() {
         reload()
+        adopt()
     }
 
     var runningCount: Int {
@@ -70,12 +79,13 @@ final class ProcessManager {
         guard pids[key] == nil else { return }
 
         let url = logURL(key)
+        let directory = project.directory(for: service)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        append(url, "\n===== iniciando `\(service.command)` em \(project.expandedPath) — \(Date()) =====\n")
+        append(url, "\n===== iniciando `\(service.command)` em \(directory) — \(Date()) =====\n")
 
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let rc = shell.hasSuffix("zsh") ? "[ -f ~/.zshrc ] && source ~/.zshrc >/dev/null 2>&1; " : ""
-        let script = rc + "cd \(shellQuote(project.expandedPath)) && \(service.command)"
+        let script = rc + "cd \(shellQuote(directory)) && \(service.command)"
 
         var env = ProcessInfo.processInfo.environment
         service.env?.forEach { env[$0.key] = $0.value }
@@ -164,6 +174,7 @@ final class ProcessManager {
         guard pids[key] == pid else { return }
         kill(-pid, SIGTERM)
         pids[key] = nil
+        watchers.removeValue(forKey: key)?.cancel()
         let wasStopping = statuses[key] == .stopping
         statuses[key] = wasStopping ? .stopped : .exited(code)
         append(logURL(key), "\n===== encerrado com código \(code) — \(Date()) =====\n")
@@ -173,6 +184,36 @@ final class ProcessManager {
            let project = projects.first(where: { $0.name == key.project }),
            let service = project.services.first(where: { $0.name == key.service }) {
             start(project, service)
+        }
+    }
+
+    private func saveState() {
+        let entries = pids.map { RunningEntry(key: $0.key, pid: $0.value) }
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        try? data.write(to: ConfigStore.stateFile)
+    }
+
+    private func adopt() {
+        guard let data = try? Data(contentsOf: ConfigStore.stateFile),
+              let entries = try? JSONDecoder().decode([RunningEntry].self, from: data) else { return }
+        for entry in entries where getpgid(entry.pid) == entry.pid && kill(entry.pid, 0) == 0 {
+            pids[entry.key] = entry.pid
+            statuses[entry.key] = .running
+            watch(entry.key, pid: entry.pid)
+            print("Serviço \(entry.key.project)/\(entry.key.service) retomado com pid \(entry.pid)")
+        }
+        saveState()
+    }
+
+    private func watch(_ key: ServiceKey, pid: pid_t) {
+        let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.handleExit(key, pid: pid, code: -1)
+        }
+        watchers[key] = source
+        source.resume()
+        if kill(pid, 0) != 0 {
+            handleExit(key, pid: pid, code: -1)
         }
     }
 

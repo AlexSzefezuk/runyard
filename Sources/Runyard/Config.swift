@@ -3,6 +3,7 @@ import Foundation
 struct ServiceConfig: Codable, Hashable {
     var name: String
     var command: String
+    var path: String?
     var env: [String: String]?
 }
 
@@ -19,6 +20,13 @@ struct Project {
     let file: URL
 
     var expandedPath: String { (path as NSString).expandingTildeInPath }
+
+    func directory(for service: ServiceConfig) -> String {
+        guard let servicePath = service.path else { return expandedPath }
+        let expanded = (servicePath as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") { return expanded }
+        return (expandedPath as NSString).appendingPathComponent(expanded)
+    }
 }
 
 enum ConfigStore {
@@ -26,6 +34,7 @@ enum ConfigStore {
     static let directory = home.appendingPathComponent(".config/runyard")
     static let projectsDirectory = directory.appendingPathComponent("projects")
     static let logsDirectory = home.appendingPathComponent("Library/Logs/runyard")
+    static let stateFile = directory.appendingPathComponent("state.json")
 
     static func load() -> (projects: [Project], errors: [String]) {
         let manager = FileManager.default
