@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "server.rack", accessibilityDescription: "Runyard")
+        statusItem.button?.image = menuBarIcon()
         statusItem.button?.imagePosition = .imageLeading
         menu.delegate = self
         menu.autoenablesItems = false
@@ -48,6 +48,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         manager.reload()
         build(menu)
+    }
+
+    private func menuBarIcon() -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "pdf"),
+              let image = NSImage(contentsOf: url) else {
+            return NSImage(systemSymbolName: "server.rack", accessibilityDescription: "Runyard")
+        }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        image.accessibilityDescription = "Runyard"
+        return image
     }
 
     private func updateButton() {
