@@ -24,6 +24,15 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
     private let initialBytes: UInt64 = 512 * 1024
     private let maxCharacters = 2_000_000
     private let selectedKey = "logWindowSelection"
+    private let formattedKey = "logWindowFormatted"
+    private let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private lazy var formatter = LogFormatter(font: font)
+    private var pending = ""
+
+    private var formatted: Bool {
+        get { UserDefaults.standard.object(forKey: formattedKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: formattedKey) }
+    }
 
     private init() {
         scrollView = NSTextView.scrollableTextView()
@@ -94,7 +103,7 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
-        textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        textView.font = font
         textView.textColor = .labelColor
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.isAutomaticLinkDetectionEnabled = false
@@ -191,8 +200,23 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         let start = size > initialBytes ? size - initialBytes : 0
         let result = LogReader.read(url, from: start, to: size)
         offset = result.end
-        textView.string = result.text
+        pending = ""
+        formatter.reset()
+        textView.textStorage?.setAttributedString(render(result.text))
         scrollToBottom()
+    }
+
+    private func render(_ raw: String) -> NSAttributedString {
+        if formatted {
+            return formatter.format(raw)
+        }
+        return NSAttributedString(string: LogReader.clean(raw), attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+    }
+
+    private func toggleFormatted() {
+        formatted.toggle()
+        loadLog()
+        updateHeader()
     }
 
     private func follow() {
@@ -203,15 +227,21 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
             loadLog()
             return
         }
-        guard size > offset else { return }
-        let atBottom = isAtBottom()
         let result = LogReader.read(url, from: offset, to: size)
         offset = result.end
-        guard !result.text.isEmpty, let storage = textView.textStorage else { return }
-        storage.append(NSAttributedString(string: result.text, attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: NSColor.labelColor
-        ]))
+        var chunk = pending + result.text
+        if result.text.isEmpty {
+            pending = ""
+        } else if let newline = chunk.lastIndex(of: "\n") {
+            pending = String(chunk[chunk.index(after: newline)...])
+            chunk = String(chunk[...newline])
+        } else {
+            pending = chunk
+            chunk = ""
+        }
+        guard !chunk.isEmpty, let storage = textView.textStorage else { return }
+        let atBottom = isAtBottom()
+        storage.append(render(chunk))
         if storage.length > maxCharacters {
             storage.deleteCharacters(in: NSRange(location: 0, length: storage.length - maxCharacters))
         }
@@ -259,6 +289,9 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         } else {
             views.append(ClosureButton(symbol: "play.fill", tooltip: "Subir") { [weak manager] in manager?.start(project, service) })
         }
+        let formatToggle = ClosureButton(symbol: "paintpalette", tooltip: formatted ? "Desligar formatação" : "Ligar formatação") { [weak self] in self?.toggleFormatted() }
+        formatToggle.contentTintColor = formatted ? .controlAccentColor : .secondaryLabelColor
+        views.append(formatToggle)
         views.append(ClosureButton(symbol: "trash", tooltip: "Limpar a tela") { [weak self] in self?.textView.string = "" })
         views.append(ClosureButton(symbol: "arrow.down.to.line", tooltip: "Ir para o fim") { [weak self] in self?.scrollToBottom() })
         views.append(ClosureButton(symbol: "arrow.up.forward.app", tooltip: "Abrir no Console") { [weak manager] in manager?.openLog(selected) })

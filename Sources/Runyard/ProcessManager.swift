@@ -91,6 +91,8 @@ final class ProcessManager {
         let script = rc + "cd \(shellQuote(directory)) && \(service.command)"
 
         var env = ProcessInfo.processInfo.environment
+        env["FORCE_COLOR"] = env["FORCE_COLOR"] ?? "1"
+        env["CLICOLOR_FORCE"] = env["CLICOLOR_FORCE"] ?? "1"
         service.env?.forEach { env[$0.key] = $0.value }
 
         let pid: pid_t
