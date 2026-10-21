@@ -58,6 +58,7 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         if window?.isVisible != true {
             window?.center()
         }
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -72,6 +73,7 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
     func windowWillClose(_ notification: Notification) {
         timer?.invalidate()
         timer = nil
+        NSApp.setActivationPolicy(.accessory)
     }
 
     private func build() {
@@ -96,6 +98,8 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         textView.textColor = .labelColor
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.isAutomaticLinkDetectionEnabled = false
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
         scrollView.hasVerticalScroller = true
 
         titleLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)

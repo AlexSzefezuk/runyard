@@ -89,7 +89,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let edit = NSMenu(title: "Editar")
         edit.addItem(withTitle: "Copiar", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Selecionar tudo", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        edit.addItem(withTitle: "Buscar", action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f").tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+        edit.addItem(.separator())
+        let find: [(String, String, NSEvent.ModifierFlags, NSFindPanelAction)] = [
+            ("Buscar", "f", [.command], .showFindPanel),
+            ("Buscar próximo", "g", [.command], .next),
+            ("Buscar anterior", "g", [.command, .shift], .previous)
+        ]
+        for (title, key, modifiers, action) in find {
+            let item = edit.addItem(withTitle: title, action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            item.tag = Int(action.rawValue)
+        }
         editItem.submenu = edit
         main.addItem(editItem)
         return main
