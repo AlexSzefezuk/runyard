@@ -120,17 +120,20 @@ class HoverRowView: NSView {
         return field
     }
 
-    func layout(leading: NSView, leadingInset: CGFloat, text: NSView, buttons: NSStackView) {
+    func layout(leading: NSView, leadingInset: CGFloat, text: NSView, buttons: NSStackView, rowHeight: CGFloat? = nil) {
         [leading, text, buttons].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
+        let center = { (view: NSView) in
+            rowHeight.map { view.centerYAnchor.constraint(equalTo: self.topAnchor, constant: $0 / 2) } ?? view.centerYAnchor.constraint(equalTo: self.centerYAnchor)
+        }
         NSLayoutConstraint.activate([
             leading.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingInset),
-            leading.centerYAnchor.constraint(equalTo: centerYAnchor),
-            text.centerYAnchor.constraint(equalTo: centerYAnchor),
+            center(leading),
+            center(text),
             buttons.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            buttons.centerYAnchor.constraint(equalTo: centerYAnchor),
+            center(buttons),
             text.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -8)
         ])
     }
@@ -193,12 +196,21 @@ final class ServiceRowView: HoverRowView {
     private let manager: ProcessManager
     private let dot = NSImageView()
     private let buttons = NSStackView()
+    private let tail = NSStackView()
+    private let onToggleTail: () -> Void
+    private let onAction: () -> Void
+    private static let rowHeight: CGFloat = 38
+    private static let tailLines = 3
+    private static let tailLineHeight: CGFloat = 14
 
-    init(project: Project, service: ServiceConfig, manager: ProcessManager) {
+    init(project: Project, service: ServiceConfig, manager: ProcessManager, showsTail: Bool, onToggleTail: @escaping () -> Void, onAction: @escaping () -> Void) {
         self.project = project
         self.service = service
         self.manager = manager
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: 38))
+        self.onToggleTail = onToggleTail
+        self.onAction = onAction
+        let height = Self.rowHeight + (showsTail ? CGFloat(Self.tailLines) * Self.tailLineHeight + 6 : 0)
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.width, height: height))
 
         let name = label(service.name, font: .menuFont(ofSize: 0))
         let command = label(service.command, font: .systemFont(ofSize: NSFont.smallSystemFontSize), color: .secondaryLabelColor)
@@ -209,13 +221,46 @@ final class ServiceRowView: HoverRowView {
         toolTip = service.command
         buttons.spacing = 0
 
-        layout(leading: dot, leadingInset: 32, text: text, buttons: buttons)
+        layout(leading: dot, leadingInset: 32, text: text, buttons: buttons, rowHeight: Self.rowHeight)
         text.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8).isActive = true
+
+        if showsTail {
+            tail.orientation = .vertical
+            tail.alignment = .leading
+            tail.spacing = 0
+            tail.translatesAutoresizingMaskIntoConstraints = false
+            for _ in 0..<Self.tailLines {
+                let line = label("", font: .monospacedSystemFont(ofSize: 10, weight: .regular), color: .tertiaryLabelColor)
+                line.heightAnchor.constraint(equalToConstant: Self.tailLineHeight).isActive = true
+                tail.addArrangedSubview(line)
+            }
+            addSubview(tail)
+            NSLayoutConstraint.activate([
+                tail.topAnchor.constraint(equalTo: topAnchor, constant: Self.rowHeight - 2),
+                tail.leadingAnchor.constraint(equalTo: text.leadingAnchor),
+                tail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16)
+            ])
+            refreshTail()
+        }
         refresh()
     }
 
     required init?(coder: NSCoder) {
         fatalError()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onToggleTail()
+    }
+
+    func refreshTail() {
+        guard !tail.arrangedSubviews.isEmpty else { return }
+        let lines = LogReader.lastLines(manager.logURL(manager.key(project, service)), count: Self.tailLines)
+        let padded = Array(repeating: "", count: Self.tailLines - lines.count) + lines
+        for (field, line) in zip(tail.arrangedSubviews.compactMap { $0 as? NSTextField }, padded) {
+            field.stringValue = line
+            field.toolTip = line.isEmpty ? nil : line
+        }
     }
 
     func refresh() {
@@ -229,12 +274,21 @@ final class ServiceRowView: HoverRowView {
         let service = service
         var views: [NSView] = []
         if active {
-            views.append(ClosureButton(symbol: "arrow.clockwise", tooltip: "Reiniciar") { [weak manager] in manager?.restart(project, service) })
+            views.append(ClosureButton(symbol: "arrow.clockwise", tooltip: "Reiniciar") { [weak self, weak manager] in
+                manager?.restart(project, service)
+                self?.onAction()
+            })
             views.append(ClosureButton(symbol: "stop.fill", tooltip: "Parar") { [weak manager] in manager?.stop(key) })
         } else {
-            views.append(ClosureButton(symbol: "play.fill", tooltip: "Subir") { [weak manager] in manager?.start(project, service) })
+            views.append(ClosureButton(symbol: "play.fill", tooltip: "Subir") { [weak self, weak manager] in
+                manager?.start(project, service)
+                self?.onAction()
+            })
         }
-        views.append(ClosureButton(symbol: "doc.text", tooltip: "Ver log", enabled: active || manager.hasLog(key)) { [weak manager] in manager?.openLog(key) })
+        views.append(ClosureButton(symbol: "doc.text", tooltip: "Ver log", enabled: active || manager.hasLog(key)) { [weak self] in
+            self?.enclosingMenuItem?.menu?.cancelTracking()
+            LogWindowController.shared.show(key)
+        })
         buttons.setViews(views, in: .trailing)
     }
 }

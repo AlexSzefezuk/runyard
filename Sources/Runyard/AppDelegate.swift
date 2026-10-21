@@ -32,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var server = ControlServer(manager: manager)
     private var header: NSMenuItem?
     private var refreshers: [() -> Void] = []
+    private var tailRefreshers: [() -> Void] = []
+    private var tailTimer: Timer?
+    private var openTails: Set<ServiceKey> = []
     private let expandedKey = "expandedProjects"
 
     private var expanded: Set<String> {
@@ -46,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
         statusItem.menu = menu
+        NSApp.mainMenu = mainMenu()
         manager.onChange = { [weak self] in self?.refresh() }
         refresh()
         server.start()
@@ -59,6 +63,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         manager.reload()
         build(menu)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tailRefreshers.forEach { $0() } }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        tailTimer = timer
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        tailTimer?.invalidate()
+        tailTimer = nil
+        openTails = []
+    }
+
+    private func mainMenu() -> NSMenu {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        appItem.submenu = NSMenu()
+        appItem.submenu?.addItem(withTitle: "Fechar janela", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        main.addItem(appItem)
+        let editItem = NSMenuItem()
+        let edit = NSMenu(title: "Editar")
+        edit.addItem(withTitle: "Copiar", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Selecionar tudo", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(withTitle: "Buscar", action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f").tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+        editItem.submenu = edit
+        main.addItem(editItem)
+        return main
     }
 
     private func menuBarIcon() -> NSImage? {
@@ -78,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         header?.title = count > 0 ? "\(count) serviço(s) rodando" : "Nenhum serviço rodando"
         header?.image = StatusStyle.dot(StatusStyle.color(allStatuses()))
         refreshers.forEach { $0() }
+        LogWindowController.shared.refresh()
     }
 
     private func allStatuses() -> [ServiceStatus] {
@@ -95,9 +130,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func setTail(_ key: ServiceKey, open: Bool?) {
+        let isOpen = openTails.contains(key)
+        let target = open ?? !isOpen
+        guard target != isOpen else { return }
+        if target {
+            openTails.insert(key)
+        } else {
+            openTails.remove(key)
+        }
+        DispatchQueue.main.async {
+            self.build(self.menu)
+        }
+    }
+
     private func build(_ menu: NSMenu) {
         menu.removeAllItems()
         refreshers = []
+        tailRefreshers = []
 
         let header = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -129,13 +179,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             guard isOpen else { continue }
             for service in project.services {
-                let row = ServiceRowView(project: project, service: service, manager: manager)
+                let key = manager.key(project, service)
+                let row = ServiceRowView(
+                    project: project,
+                    service: service,
+                    manager: manager,
+                    showsTail: openTails.contains(key),
+                    onToggleTail: { [weak self] in self?.setTail(key, open: nil) },
+                    onAction: { [weak self] in self?.setTail(key, open: true) }
+                )
                 add(row, to: menu)
                 refreshers.append(row.refresh)
+                tailRefreshers.append(row.refreshTail)
             }
         }
 
         menu.addItem(.separator())
+        menu.addItem(ActionItem("Janela de logs", symbol: "text.alignleft", key: "l") {
+            LogWindowController.shared.show()
+        })
         menu.addItem(ActionItem("Abrir pasta de registros", symbol: "square.and.pencil") {
             NSWorkspace.shared.open(ConfigStore.projectsDirectory)
         })
