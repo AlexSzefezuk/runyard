@@ -66,6 +66,7 @@ final class ClosureButton: NSButton {
 
 class HoverRowView: NSView {
     static let width: CGFloat = 360
+    private static weak var hovered: HoverRowView?
 
     private var hovering = false {
         didSet { needsDisplay = true }
@@ -78,10 +79,28 @@ class HoverRowView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        if let previous = Self.hovered, previous !== self {
+            previous.hovering = false
+        }
+        Self.hovered = self
         hovering = true
     }
 
     override func mouseExited(with event: NSEvent) {
+        clearHover()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil {
+            clearHover()
+        }
+    }
+
+    private func clearHover() {
+        if Self.hovered === self {
+            Self.hovered = nil
+        }
         hovering = false
     }
 
