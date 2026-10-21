@@ -4,6 +4,7 @@ import RunyardCore
 final class LogFormatter {
     private static let escapes = try! NSRegularExpression(pattern: LogReader.escapePattern)
     private static let highlights: [(NSRegularExpression, Int, (String) -> NSColor?)] = [
+        (regex("(?<=\\s)[A-Za-z_][\\w.-]*(?==)"), 0, { _ in .secondaryLabelColor }),
         (regex("^===== .* =====$"), 0, { $0.contains("código 0") ? .systemGreen : $0.contains("encerrado") || $0.contains("falha") ? .systemRed : .systemBlue }),
         (regex("\\b(fatal|panic|critical|emergency|alert|error|err|exception|failed|failure|uncaught|erro|falha|falhou)\\b", insensitive: true), 0, { _ in .systemRed }),
         (regex("\\b(warn|warning|deprecated|aviso)\\b", insensitive: true), 0, { _ in .systemOrange }),
@@ -13,7 +14,6 @@ final class LogFormatter {
         (regex("\\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\b.*?\\b([1-5]\\d{2})\\b"), 1, { statusColor($0) }),
         (regex("\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?"), 0, { _ in .tertiaryLabelColor }),
         (regex("\\b\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?\\b"), 0, { _ in .tertiaryLabelColor }),
-        (regex("(?<=\\s)[A-Za-z_][\\w.-]*(?==)"), 0, { _ in .secondaryLabelColor })
     ]
     private static let urls = regex("https?://[^\\s\"'<>()\\[\\]]+")
     private static let levelNames: [Int: String] = [10: "TRACE", 20: "DEBUG", 30: "INFO", 40: "WARN", 50: "ERROR", 60: "FATAL"]
@@ -131,25 +131,54 @@ final class LogFormatter {
     private func organizeJSON(_ raw: String) -> String {
         guard raw.contains("{") else { return raw }
         return raw.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}"),
-                  let data = trimmed.data(using: .utf8),
-                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return String(line) }
-            var parts: [String] = []
-            if let time = Self.take(&object, ["time", "timestamp", "datetime", "ts", "@timestamp"]) {
-                parts.append(Self.describeTime(time))
+            guard line.contains("{") else { return String(line) }
+            let plain = LogReader.clean(String(line))
+            let trimmed = plain.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasSuffix("}") else { return String(line) }
+            if trimmed.hasPrefix("{"), let object = Self.parse(trimmed) {
+                return Self.describeEntry(object)
             }
-            if let level = Self.take(&object, ["level", "level_name", "severity", "lvl"]) {
-                parts.append(Self.describeLevel(level))
+            var tries = 0
+            var index = plain.firstIndex(of: "{")
+            while let start = index, tries < 5 {
+                if let object = Self.parse(plain[start...].trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    let prefix = String(plain[..<start]).replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+                    let context = Self.describeFields(object)
+                    return context.isEmpty ? prefix : "\(prefix)  \(context)"
+                }
+                tries += 1
+                index = plain[plain.index(after: start)...].firstIndex(of: "{")
             }
-            if let message = Self.take(&object, ["msg", "message"]) {
-                parts.append("\(message)")
-            }
-            for key in object.keys.sorted() {
-                parts.append("\(key)=\(Self.describe(object[key] as Any))")
-            }
-            return parts.joined(separator: " ")
+            return String(line)
         }.joined(separator: "\n")
+    }
+
+    private static func parse(_ text: String) -> [String: Any]? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func describeEntry(_ entry: [String: Any]) -> String {
+        var object = entry
+        var parts: [String] = []
+        if let time = take(&object, ["time", "timestamp", "datetime", "ts", "@timestamp"]) {
+            parts.append(describeTime(time))
+        }
+        if let level = take(&object, ["level", "level_name", "severity", "lvl"]) {
+            parts.append(describeLevel(level))
+        }
+        if let message = take(&object, ["msg", "message"]) {
+            parts.append("\(message)")
+        }
+        let fields = describeFields(object)
+        if !fields.isEmpty {
+            parts.append(fields)
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private static func describeFields(_ object: [String: Any]) -> String {
+        object.sorted { $0.key < $1.key }.map { "\($0.key)=\(describe($0.value))" }.joined(separator: " ")
     }
 
     private static func take(_ object: inout [String: Any], _ keys: [String]) -> Any? {
@@ -167,11 +196,21 @@ final class LogFormatter {
     }
 
     private static func describeTime(_ value: Any) -> String {
-        guard let number = value as? Double else { return "\(value)" }
-        let seconds = number > 1_000_000_000_000 ? number / 1000 : number
+        let date: Date?
+        if let number = value as? Double {
+            date = Date(timeIntervalSince1970: number > 1_000_000_000_000 ? number / 1000 : number)
+        } else if let text = value as? String {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let plainISO = ISO8601DateFormatter()
+            date = iso.date(from: text) ?? plainISO.date(from: text)
+        } else {
+            date = nil
+        }
+        guard let date else { return "\(value)" }
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter.string(from: Date(timeIntervalSince1970: seconds))
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
     }
 
     private static func describe(_ value: Any) -> String {
