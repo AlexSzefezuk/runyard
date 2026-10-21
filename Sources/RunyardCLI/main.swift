@@ -118,6 +118,10 @@ func showLogs(_ args: [String]) -> Never {
     guard FileManager.default.fileExists(atPath: url.path) else {
         fail("Sem log em \(url.path)")
     }
+    if !follow, isatty(STDOUT_FILENO) == 0, let count = Int(lines) {
+        LogReader.lastLines(url, count: count, compact: false).forEach { print($0) }
+        exit(0)
+    }
     var argv = ["tail", "-n", lines]
     if follow { argv.append("-f") }
     argv.append(url.path)
