@@ -28,6 +28,7 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
     private let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
     private lazy var formatter = LogFormatter(font: font)
     private var pending = ""
+    private var headerURL: URL?
 
     private var formatted: Bool {
         get { UserDefaults.standard.object(forKey: formattedKey) as? Bool ?? true }
@@ -221,6 +222,11 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
 
     private func follow() {
         guard let selected else { return }
+        if let project = manager.projects.first(where: { $0.name == selected.project }),
+           let service = project.services.first(where: { $0.name == selected.service }),
+           manager.serviceURL(project, service) != headerURL {
+            updateHeader()
+        }
         let url = manager.logURL(selected)
         let size = LogReader.size(url)
         if size < offset {
@@ -283,6 +289,10 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         statusLabel.stringValue = "\(StatusStyle.label(status)) · \(service.command)"
 
         var views: [NSView] = []
+        headerURL = manager.serviceURL(project, service)
+        if let url = headerURL {
+            views.append(ClosureButton(symbol: "safari", tooltip: "Abrir \(url.absoluteString)") { NSWorkspace.shared.open(url) })
+        }
         if active {
             views.append(ClosureButton(symbol: "arrow.clockwise", tooltip: "Reiniciar") { [weak manager] in manager?.restart(project, service) })
             views.append(ClosureButton(symbol: "stop.fill", tooltip: "Parar") { [weak manager] in manager?.stop(selected) })

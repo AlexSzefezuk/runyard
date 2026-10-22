@@ -198,6 +198,7 @@ final class ServiceRowView: HoverRowView {
     private let buttons = NSStackView()
     private let tail = NSStackView()
     private let onToggleTail: () -> Void
+    private var shownURL: URL?
     private let onAction: () -> Void
     private static let rowHeight: CGFloat = 38
     private static let tailLines = 3
@@ -253,6 +254,12 @@ final class ServiceRowView: HoverRowView {
         onToggleTail()
     }
 
+    func refreshURL() {
+        if manager.serviceURL(project, service) != shownURL {
+            refresh()
+        }
+    }
+
     func refreshTail() {
         guard !tail.arrangedSubviews.isEmpty else { return }
         let lines = LogReader.lastLines(manager.logURL(manager.key(project, service)), count: Self.tailLines)
@@ -273,6 +280,13 @@ final class ServiceRowView: HoverRowView {
         let project = project
         let service = service
         var views: [NSView] = []
+        shownURL = manager.serviceURL(project, service)
+        if let url = shownURL {
+            views.append(ClosureButton(symbol: "safari", tooltip: "Abrir \(url.absoluteString)") { [weak self] in
+                self?.enclosingMenuItem?.menu?.cancelTracking()
+                NSWorkspace.shared.open(url)
+            })
+        }
         if active {
             views.append(ClosureButton(symbol: "arrow.clockwise", tooltip: "Reiniciar") { [weak self, weak manager] in
                 manager?.restart(project, service)

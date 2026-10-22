@@ -202,7 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 )
                 add(row, to: menu)
                 refreshers.append(row.refresh)
-                tailRefreshers.append(row.refreshTail)
+                tailRefreshers.append {
+                    row.refreshTail()
+                    row.refreshURL()
+                }
             }
         }
 

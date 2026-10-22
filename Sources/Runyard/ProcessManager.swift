@@ -36,6 +36,8 @@ final class ProcessManager {
     }
     private var watchers: [ServiceKey: DispatchSourceProcess] = [:]
     private var pendingRestart: Set<ServiceKey> = []
+    private var detectedURLs: [ServiceKey: URL] = [:]
+    private var scannedSizes: [ServiceKey: UInt64] = [:]
     private let killTimeout: TimeInterval = 15
 
     init() {
@@ -74,6 +76,23 @@ final class ProcessManager {
         pids[key]
     }
 
+    func serviceURL(_ project: Project, _ service: ServiceConfig) -> URL? {
+        let key = key(project, service)
+        guard pids[key] != nil else { return nil }
+        if let configured = service.url {
+            return URL(string: configured)
+        }
+        if let url = detectedURLs[key] {
+            return url
+        }
+        let url = logURL(key)
+        let size = LogReader.size(url)
+        guard scannedSizes[key] != size else { return nil }
+        scannedSizes[key] = size
+        detectedURLs[key] = LogReader.localURL(in: url, currentRunOnly: true)
+        return detectedURLs[key]
+    }
+
     func hasLog(_ key: ServiceKey) -> Bool {
         FileManager.default.fileExists(atPath: logURL(key).path)
     }
@@ -107,6 +126,8 @@ final class ProcessManager {
         }
 
         pids[key] = pid
+        detectedURLs[key] = nil
+        scannedSizes[key] = nil
         statuses[key] = .running
         print("Serviço \(key.project)/\(key.service) iniciado com pid \(pid)")
 

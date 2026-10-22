@@ -3,6 +3,11 @@ import Foundation
 public enum LogReader {
     public static let escapePattern = "\u{1B}\\[([0-9;?]*)[ -/]*([@-~])|\u{1B}\\][^\u{07}\u{1B}]*(?:\u{07}|\u{1B}\\\\)|\u{1B}[()][A-Z0-9]"
     private static let escapes = try! NSRegularExpression(pattern: escapePattern)
+    private static let localURLs = try! NSRegularExpression(
+        pattern: "https?://(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1?\\]|[\\w-]+(?:\\.[\\w-]+)*\\.(?:test|localhost|local))(?::\\d+)?(?:/[^\\s\"'<>()\\[\\]]*)?",
+        options: [.caseInsensitive]
+    )
+    public static let runMarker = "===== iniciando"
 
     public static func size(_ url: URL) -> UInt64 {
         ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.uint64Value ?? 0
@@ -39,6 +44,23 @@ public enum LogReader {
             }
             window *= 4
         }
+    }
+
+    public static func localURL(in url: URL, currentRunOnly: Bool) -> URL? {
+        let end = size(url)
+        let start = end > 262_144 ? end - 262_144 : 0
+        var text = clean(read(url, from: start, to: end).text)
+        if currentRunOnly, let marker = text.range(of: runMarker, options: .backwards) {
+            text = String(text[marker.upperBound...])
+        }
+        let matches = localURLs.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        guard let match = currentRunOnly ? matches.first : matches.last,
+              let range = Range(match.range, in: text) else { return nil }
+        let found = String(text[range])
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:"))
+            .replacingOccurrences(of: "0.0.0.0", with: "localhost")
+            .replacingOccurrences(of: "[::]", with: "localhost")
+        return URL(string: found)
     }
 
     public static func clean(_ text: String) -> String {
