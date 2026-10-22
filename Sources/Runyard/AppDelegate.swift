@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         NSApp.mainMenu = mainMenu()
         manager.onChange = { [weak self] in self?.refresh() }
-        manager.onCrash = { key, status in Notifier.shared.serviceCrashed(key, status: status) }
+        manager.onCrash = { key, status, note in Notifier.shared.serviceCrashed(key, status: status, note: note) }
         Notifier.shared.setup()
         refresh()
         server.start()

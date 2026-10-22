@@ -29,7 +29,7 @@ final class ProcessManager {
         didSet { onChange?() }
     }
     var onChange: (() -> Void)?
-    var onCrash: ((ServiceKey, ServiceStatus) -> Void)?
+    var onCrash: ((ServiceKey, ServiceStatus, String?) -> Void)?
 
     private var pids: [ServiceKey: pid_t] = [:] {
         didSet { saveState() }
@@ -38,6 +38,11 @@ final class ProcessManager {
     private var pendingRestart: Set<ServiceKey> = []
     private var detectedURLs: [ServiceKey: URL] = [:]
     private var scannedSizes: [ServiceKey: UInt64] = [:]
+    private var crashTimes: [ServiceKey: [Date]] = [:]
+    private var scheduledRestarts: Set<ServiceKey> = []
+    private let restartDelay: TimeInterval = 2
+    private let restartWindow: TimeInterval = 60
+    private let maxRestarts = 5
     private let killTimeout: TimeInterval = 15
 
     init() {
@@ -143,6 +148,8 @@ final class ProcessManager {
     }
 
     func stop(_ key: ServiceKey) {
+        scheduledRestarts.remove(key)
+        crashTimes[key] = nil
         guard let pid = pids[key] else { return }
         statuses[key] = .stopping
         kill(-pid, SIGTERM)
@@ -184,6 +191,7 @@ final class ProcessManager {
 
     func quit() {
         pendingRestart.removeAll()
+        scheduledRestarts.removeAll()
         pids.keys.forEach { stop($0) }
         let deadline = Date().addingTimeInterval(killTimeout)
         Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { timer in
@@ -206,15 +214,37 @@ final class ProcessManager {
         statuses[key] = wasStopping ? .stopped : .exited(code)
         append(logURL(key), "\n===== encerrado com código \(code) — \(timestamp()) =====\n")
         print("Serviço \(key.project)/\(key.service) encerrado com código \(code)")
+        let found = projects.first(where: { $0.name == key.project }).flatMap { project in
+            project.services.first(where: { $0.name == key.service }).map { (project, $0) }
+        }
         if !wasStopping && code != 0 {
-            onCrash?(key, status(key))
+            onCrash?(key, status(key), found?.1.restart == true ? scheduleRestart(key) : nil)
         }
 
-        if pendingRestart.remove(key) != nil,
-           let project = projects.first(where: { $0.name == key.project }),
-           let service = project.services.first(where: { $0.name == key.service }) {
+        if pendingRestart.remove(key) != nil, let (project, service) = found {
             start(project, service)
         }
+    }
+
+    private func scheduleRestart(_ key: ServiceKey) -> String {
+        let now = Date()
+        let recent = (crashTimes[key] ?? []).filter { now.timeIntervalSince($0) < restartWindow } + [now]
+        crashTimes[key] = recent
+        guard recent.count <= maxRestarts else {
+            append(logURL(key), "===== reinício automático suspenso após \(maxRestarts) quedas em 1 minuto =====\n")
+            print("Reinício automático de \(key.project)/\(key.service) suspenso")
+            return "Reinício automático suspenso após \(maxRestarts) quedas em 1 minuto"
+        }
+        scheduledRestarts.insert(key)
+        append(logURL(key), "===== reiniciando automaticamente em \(Int(restartDelay))s (tentativa \(recent.count) de \(maxRestarts)) =====\n")
+        DispatchQueue.main.asyncAfter(deadline: .now() + restartDelay) {
+            guard self.scheduledRestarts.remove(key) != nil, self.pids[key] == nil,
+                  let project = self.projects.first(where: { $0.name == key.project }),
+                  let service = project.services.first(where: { $0.name == key.service }) else { return }
+            print("Reiniciando automaticamente \(key.project)/\(key.service)")
+            self.start(project, service)
+        }
+        return "Reiniciando em \(Int(restartDelay))s (tentativa \(recent.count) de \(maxRestarts))"
     }
 
     private func timestamp() -> String {

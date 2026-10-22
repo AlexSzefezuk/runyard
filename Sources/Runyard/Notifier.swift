@@ -31,8 +31,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func serviceCrashed(_ key: ServiceKey, status: ServiceStatus, note: String? = nil) {
         let content = UNMutableNotificationContent()
         content.title = "\(key.project) / \(key.service) caiu"
-        let lastLine = LogReader.lastLines(ConfigStore.logURL(project: key.project, service: key.service), count: 2)
-            .first { !$0.hasPrefix("=====") }
+        let lastLine = LogReader.lastLines(ConfigStore.logURL(project: key.project, service: key.service), count: 6)
+            .last { !$0.hasPrefix("=====") }
         content.body = [StatusStyle.label(status), note, lastLine].compactMap { $0 }.joined(separator: "\n")
         content.sound = .default
         content.categoryIdentifier = crashCategory
