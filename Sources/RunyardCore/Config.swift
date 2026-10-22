@@ -7,6 +7,7 @@ public struct ServiceConfig: Codable, Hashable, Sendable {
     public var env: [String: String]?
     public var url: String?
     public var restart: Bool?
+    public var port: Int?
 }
 
 struct ProjectFile: Codable {

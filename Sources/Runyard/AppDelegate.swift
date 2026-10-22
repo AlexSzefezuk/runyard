@@ -52,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.mainMenu = mainMenu()
         manager.onChange = { [weak self] in self?.refresh() }
         manager.onCrash = { key, status, note in Notifier.shared.serviceCrashed(key, status: status, note: note) }
+        manager.onPortConflict = { [weak self] project, service, port, owners in
+            self?.resolvePortConflict(project, service, port: port, owners: owners)
+        }
         Notifier.shared.setup()
         refresh()
         server.start()
@@ -237,6 +240,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem()
         item.view = view
         menu.addItem(item)
+    }
+
+    private func resolvePortConflict(_ project: Project, _ service: ServiceConfig, port: Int, owners: [PortOwner]) {
+        menu.cancelTracking()
+        DispatchQueue.main.async { [manager] in
+            let alert = NSAlert()
+            alert.messageText = "A porta \(port) já está em uso"
+            alert.informativeText = "\(project.name)/\(service.name) usa a porta \(port), que está ocupada por:\n" + owners.map(manager.describe).joined(separator: "\n")
+            alert.addButton(withTitle: "Encerrar e subir")
+            alert.addButton(withTitle: "Subir mesmo assim")
+            alert.addButton(withTitle: "Cancelar")
+            NSApp.activate(ignoringOtherApps: true)
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                manager.freePort(port, owners: owners) { manager.launch(project, service) }
+            case .alertSecondButtonReturn:
+                manager.launch(project, service)
+            default:
+                print("Início de \(project.name)/\(service.name) cancelado por porta ocupada")
+            }
+        }
     }
 
     private func toggleLaunchAtLogin() {

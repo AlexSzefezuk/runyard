@@ -68,6 +68,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
         guard let project = manager.projects.first(where: { $0.name == key.project }),
               let service = project.services.first(where: { $0.name == key.service }) else { return }
-        manager.restart(project, service)
+        manager.restart(project, service, interactive: true)
     }
 }

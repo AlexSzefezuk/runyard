@@ -30,6 +30,7 @@ final class ProcessManager {
     }
     var onChange: (() -> Void)?
     var onCrash: ((ServiceKey, ServiceStatus, String?) -> Void)?
+    var onPortConflict: ((Project, ServiceConfig, Int, [PortOwner]) -> Void)?
 
     private var pids: [ServiceKey: pid_t] = [:] {
         didSet { saveState() }
@@ -102,7 +103,68 @@ final class ProcessManager {
         FileManager.default.fileExists(atPath: logURL(key).path)
     }
 
-    func start(_ project: Project, _ service: ServiceConfig) {
+    func port(_ project: Project, _ service: ServiceConfig) -> Int? {
+        if let port = service.port {
+            return port
+        }
+        if let value = service.env?["PORT"], let port = Int(value) {
+            return port
+        }
+        if let configured = service.url, let port = URL(string: configured)?.port {
+            return port
+        }
+        return LogReader.localURL(in: logURL(key(project, service)), currentRunOnly: true)?.port
+    }
+
+    func service(owning pid: pid_t) -> ServiceKey? {
+        let group = getpgid(pid)
+        return pids.first { $0.value == pid || $0.value == group }?.key
+    }
+
+    func describe(_ owner: PortOwner) -> String {
+        let label = service(owning: owner.pid).map { " — \($0.project)/\($0.service)" } ?? ""
+        return "\(owner.name) (pid \(owner.pid))\(label)"
+    }
+
+    func start(_ project: Project, _ service: ServiceConfig, interactive: Bool = false) {
+        let key = key(project, service)
+        guard pids[key] == nil else { return }
+        if let port = port(project, service) {
+            let owners = PortGuard.owners(of: port)
+            if !owners.isEmpty {
+                print("Porta \(port) de \(key.project)/\(key.service) em uso: \(owners.map(describe).joined(separator: ", "))")
+                if interactive, let onPortConflict {
+                    onPortConflict(project, service, port, owners)
+                    return
+                }
+                append(logURL(key), "\n===== aviso: porta \(port) em uso por \(owners.map(describe).joined(separator: ", ")) =====\n")
+            }
+        }
+        launch(project, service)
+    }
+
+    func freePort(_ port: Int, owners: [PortOwner], then next: @escaping () -> Void) {
+        for owner in owners {
+            if let key = service(owning: owner.pid) {
+                stop(key)
+            } else {
+                kill(owner.pid, SIGTERM)
+            }
+        }
+        print("Liberando porta \(port)")
+        let deadline = Date().addingTimeInterval(5)
+        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                let remaining = PortGuard.owners(of: port)
+                guard remaining.isEmpty || Date() > deadline else { return }
+                timer.invalidate()
+                remaining.filter { self.service(owning: $0.pid) == nil }.forEach { kill($0.pid, SIGKILL) }
+                next()
+            }
+        }
+    }
+
+    func launch(_ project: Project, _ service: ServiceConfig) {
         let key = key(project, service)
         guard pids[key] == nil else { return }
 
@@ -162,18 +224,18 @@ final class ProcessManager {
         }
     }
 
-    func restart(_ project: Project, _ service: ServiceConfig) {
+    func restart(_ project: Project, _ service: ServiceConfig, interactive: Bool = false) {
         let key = key(project, service)
         if pids[key] != nil {
             pendingRestart.insert(key)
             stop(key)
         } else {
-            start(project, service)
+            start(project, service, interactive: interactive)
         }
     }
 
-    func startAll(_ project: Project) {
-        project.services.forEach { start(project, $0) }
+    func startAll(_ project: Project, interactive: Bool = false) {
+        project.services.forEach { start(project, $0, interactive: interactive) }
     }
 
     func stopAll(_ project: Project) {

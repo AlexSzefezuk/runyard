@@ -182,7 +182,7 @@ final class ProjectHeaderView: HoverRowView {
         let anyActive = keys.contains { manager.isActive($0) }
         let project = project
         buttons.setViews([
-            ClosureButton(symbol: "play.fill", tooltip: "Subir todos") { [weak manager] in manager?.startAll(project) },
+            ClosureButton(symbol: "play.fill", tooltip: "Subir todos") { [weak manager] in manager?.startAll(project, interactive: true) },
             ClosureButton(symbol: "stop.fill", tooltip: "Parar todos", enabled: anyActive) { [weak manager] in manager?.stopAll(project) },
             ClosureButton(symbol: "square.and.pencil", tooltip: "Editar registro") { NSWorkspace.shared.open(project.file) }
         ], in: .trailing)
@@ -289,13 +289,13 @@ final class ServiceRowView: HoverRowView {
         }
         if active {
             views.append(ClosureButton(symbol: "arrow.clockwise", tooltip: "Reiniciar") { [weak self, weak manager] in
-                manager?.restart(project, service)
+                manager?.restart(project, service, interactive: true)
                 self?.onAction()
             })
             views.append(ClosureButton(symbol: "stop.fill", tooltip: "Parar") { [weak manager] in manager?.stop(key) })
         } else {
             views.append(ClosureButton(symbol: "play.fill", tooltip: "Subir") { [weak self, weak manager] in
-                manager?.start(project, service)
+                manager?.start(project, service, interactive: true)
                 self?.onAction()
             })
         }

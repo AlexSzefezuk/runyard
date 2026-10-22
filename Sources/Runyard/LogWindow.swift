@@ -305,10 +305,10 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
             views.append(ClosureButton(symbol: "safari", tooltip: "Abrir \(url.absoluteString)") { NSWorkspace.shared.open(url) })
         }
         if active {
-            views.append(ClosureButton(symbol: "arrow.clockwise", tooltip: "Reiniciar") { [weak manager] in manager?.restart(project, service) })
+            views.append(ClosureButton(symbol: "arrow.clockwise", tooltip: "Reiniciar") { [weak manager] in manager?.restart(project, service, interactive: true) })
             views.append(ClosureButton(symbol: "stop.fill", tooltip: "Parar") { [weak manager] in manager?.stop(selected) })
         } else {
-            views.append(ClosureButton(symbol: "play.fill", tooltip: "Subir") { [weak manager] in manager?.start(project, service) })
+            views.append(ClosureButton(symbol: "play.fill", tooltip: "Subir") { [weak manager] in manager?.start(project, service, interactive: true) })
         }
         let formatToggle = ClosureButton(symbol: "paintpalette", tooltip: formatted ? "Desligar formatação" : "Ligar formatação") { [weak self] in self?.toggleFormatted() }
         formatToggle.contentTintColor = formatted ? .controlAccentColor : .secondaryLabelColor
