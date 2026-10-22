@@ -6,8 +6,8 @@ final class LogFormatter {
     private static let highlights: [(NSRegularExpression, Int, (String) -> NSColor?)] = [
         (regex("(?<=\\s)[A-Za-z_][\\w.-]*(?==)"), 0, { _ in .secondaryLabelColor }),
         (regex("^===== .* =====$"), 0, { $0.contains("código 0") ? .systemGreen : $0.contains("encerrado") || $0.contains("falha") ? .systemRed : .systemBlue }),
-        (regex("\\b(fatal|panic|critical|emergency|alert|error|err|exception|failed|failure|uncaught|erro|falha|falhou)\\b", insensitive: true), 0, { _ in .systemRed }),
-        (regex("\\b(warn|warning|deprecated|aviso)\\b", insensitive: true), 0, { _ in .systemOrange }),
+        (errors, 0, { _ in .systemRed }),
+        (warnings, 0, { _ in .systemOrange }),
         (regex("\\b(info|notice|ready|success|started|listening)\\b", insensitive: true), 0, { _ in .systemGreen }),
         (regex("\\b(debug|trace|verbose)\\b", insensitive: true), 0, { _ in .secondaryLabelColor }),
         (regex("\\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\b"), 0, { _ in .systemPurple }),
@@ -15,6 +15,9 @@ final class LogFormatter {
         (regex("\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?"), 0, { _ in .tertiaryLabelColor }),
         (regex("\\b\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?\\b"), 0, { _ in .tertiaryLabelColor }),
     ]
+    private static let errors = regex("\\b(fatal|panic|critical|emergency|alert|error|err|exception|failed|failure|uncaught|erro|falha|falhou)\\b", insensitive: true)
+    private static let warnings = regex("\\b(warn|warning|deprecated|aviso)\\b", insensitive: true)
+    private static let continuation = regex("^(\\t|    |#\\d+ |\\s*at |\\s*Caused by|\\s*Stack trace|\\s*\\.\\.\\. \\d+ more)")
     private static let urls = regex("https?://[^\\s\"'<>()\\[\\]]+")
     private static let levelNames: [Int: String] = [10: "TRACE", 20: "DEBUG", 30: "INFO", 40: "WARN", 50: "ERROR", 60: "FATAL"]
 
@@ -27,6 +30,31 @@ final class LogFormatter {
     init(font: NSFont) {
         self.font = font
         boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+    }
+
+    static func filter(_ raw: String, minimumSeverity: Int) -> String {
+        guard minimumSeverity > 0 else { return raw }
+        var kept: [Substring] = []
+        var keepingContinuation = false
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            let plain = LogReader.clean(String(line))
+            let range = NSRange(plain.startIndex..., in: plain)
+            if severity(plain, range) >= minimumSeverity {
+                kept.append(line)
+                keepingContinuation = true
+            } else if keepingContinuation, continuation.firstMatch(in: plain, range: range) != nil {
+                kept.append(line)
+            } else {
+                keepingContinuation = false
+            }
+        }
+        return kept.isEmpty ? "" : kept.joined(separator: "\n") + "\n"
+    }
+
+    private static func severity(_ line: String, _ range: NSRange) -> Int {
+        if errors.firstMatch(in: line, range: range) != nil { return 2 }
+        if warnings.firstMatch(in: line, range: range) != nil { return 1 }
+        return 0
     }
 
     func reset() {

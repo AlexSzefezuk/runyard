@@ -17,6 +17,8 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
     private let titleLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let actions = NSStackView()
+    private lazy var levelControl = NSSegmentedControl(labels: ["Tudo", "Avisos", "Erros"], trackingMode: .selectOne, target: self, action: #selector(levelChanged))
+    private let levelKey = "logWindowLevel"
     private var entries: [Entry] = []
     private var selected: ServiceKey?
     private var offset: UInt64 = 0
@@ -119,7 +121,10 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         actions.spacing = 2
 
-        let header = NSStackView(views: [titleLabel, statusLabel, NSView(), actions])
+        levelControl.controlSize = .small
+        levelControl.selectedSegment = UserDefaults.standard.integer(forKey: levelKey)
+        levelControl.toolTip = "Filtrar por nível"
+        let header = NSStackView(views: [titleLabel, statusLabel, NSView(), levelControl, actions])
         header.spacing = 8
         header.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 8)
         header.setHuggingPriority(.defaultHigh, for: .vertical)
@@ -208,10 +213,16 @@ final class LogWindowController: NSWindowController, NSWindowDelegate, NSTableVi
     }
 
     private func render(_ raw: String) -> NSAttributedString {
+        let text = LogFormatter.filter(raw, minimumSeverity: levelControl.selectedSegment)
         if formatted {
-            return formatter.format(raw)
+            return formatter.format(text)
         }
-        return NSAttributedString(string: LogReader.clean(raw), attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+        return NSAttributedString(string: LogReader.clean(text), attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+    }
+
+    @objc private func levelChanged() {
+        UserDefaults.standard.set(levelControl.selectedSegment, forKey: levelKey)
+        loadLog()
     }
 
     private func toggleFormatted() {
