@@ -51,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         NSApp.mainMenu = mainMenu()
         manager.onChange = { [weak self] in self?.refresh() }
+        manager.onCrash = { key, status in Notifier.shared.serviceCrashed(key, status: status) }
+        Notifier.shared.setup()
         refresh()
         server.start()
         print("Runyard iniciado")

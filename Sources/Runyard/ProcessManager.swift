@@ -29,6 +29,7 @@ final class ProcessManager {
         didSet { onChange?() }
     }
     var onChange: (() -> Void)?
+    var onCrash: ((ServiceKey, ServiceStatus) -> Void)?
 
     private var pids: [ServiceKey: pid_t] = [:] {
         didSet { saveState() }
@@ -184,6 +185,9 @@ final class ProcessManager {
         statuses[key] = wasStopping ? .stopped : .exited(code)
         append(logURL(key), "\n===== encerrado com código \(code) — \(timestamp()) =====\n")
         print("Serviço \(key.project)/\(key.service) encerrado com código \(code)")
+        if !wasStopping && code != 0 {
+            onCrash?(key, status(key))
+        }
 
         if pendingRestart.remove(key) != nil,
            let project = projects.first(where: { $0.name == key.project }),
